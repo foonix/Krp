@@ -1,0 +1,45 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bbb281ee3bf0b054c82ac2347e9e782c, type: 3}
+  m_Name: FoonixCoolMod
+  m_EditorClassIdentifier: 
+  m_GroupName: FoonixCoolMod
+  m_Data:
+    m_SerializedData: []
+  m_GUID: 2ff593dc2bfe8934cb83d24aa5d67c50
+  m_SerializeEntries:
+  - m_GUID: 7cf5a952eeaaf55458a51fb519111cb7
+    m_Address: Assets/HelloFoonix.prefab
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: bb34f5d34a6474d4dbcb0d8069eeb8c8
+    m_Address: ConsoleDebug/ControlButton.prefab
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: 2a5800169d63d6147a2797d5c4dd8c8a
+    m_Address: KRP/KrpRenderPipeline.asmdef
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: b33f91dbcfdb0ac4ebdab43d9c4f150e
+    m_Address: KRP/KrpDefault.asset
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  - m_GUID: a2325c29cc80b2c488f58c03e7ea6189
+    m_Address: KRP/KrpShim.prefab
+    m_ReadOnly: 0
+    m_SerializedLabels: []
+  m_ReadOnly: 0
+  m_Settings: {fileID: 11400000, guid: bb1977c5a11b9be48b275d959bfafc8f, type: 2}
+  m_SchemaSet:
+    m_Schemas:
+    - {fileID: 11400000, guid: 4370ecb34b958ed4282362ee822db53e, type: 2}
+    - {fileID: 11400000, guid: 06031f08c6b257b4b921d33b1acbf319, type: 2}
