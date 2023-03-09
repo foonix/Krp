@@ -29,7 +29,7 @@ namespace Krp_BepInEx
         static Mesh fullScreenTriangle;
 
         private static readonly ShaderTagId deferredPassTag = new ShaderTagId("DEFERRED");
-        private static readonly ShaderTagId transparentPassTag = new ShaderTagId("DEFERRED");
+        private static readonly ShaderTagId transparentPassTag = new ShaderTagId("FORWARDBASE");
 
         CommandBuffer commandBuffer = new CommandBuffer();
         int frameIndex = 0;
@@ -61,6 +61,7 @@ namespace Krp_BepInEx
                 triangles = new int[] { 0, 1, 2 },
             };
             fullScreenTriangle.UploadMeshData(true);
+            RTHandles.Initialize(Screen.width, Screen.height, false, MSAASamples.None);
         }
 
         protected override void Dispose(bool disposing)
@@ -142,19 +143,12 @@ namespace Krp_BepInEx
         {
             BeginFrameRendering(context, cameras);
 
-            CommandBuffer cmdRG = CommandBufferPool.Get("KRP Main");
-            var renderGraphParams = new RenderGraphParameters()
-            {
-                scriptableRenderContext = context,
-                commandBuffer = cmdRG,
-                currentFrameIndex = frameIndex
-            };
-            m_RenderGraph.Begin(renderGraphParams);
-
-            TextureHandle displayHdrTarget = CreateMainScreenHdrTarget(m_RenderGraph, "KRP display0 HDR buffer", 0);
-            //TextureHandle cameraBackBuffer = m_RenderGraph.ImportBackbuffer(BuiltinRenderTextureType.CameraTarget);
-
-
+            var mainDisplay = Display.main;
+            RTHandles.SetReferenceSize(mainDisplay.renderingWidth, mainDisplay.renderingHeight, MSAASamples.None);
+            
+            var hdrDisplayDesc = new RenderTextureDescriptor(mainDisplay.renderingWidth, mainDisplay.renderingHeight, RenderTextureFormat.DefaultHDR);
+            RenderTexture sharedHdrDisplay0Target = new RenderTexture(hdrDisplayDesc);
+            sharedHdrDisplay0Target.name = "KRP HDR shared buffer";
 
             // Iterate over all Cameras
             // TODO: share HDR render targets between cameras with the same render target the same way BRP does,
@@ -163,7 +157,8 @@ namespace Krp_BepInEx
             {
                 if (camera.targetTexture is null)
                 {
-                    CreateCameraGraph(ref context, camera, m_RenderGraph, ref displayHdrTarget);
+                    //CreateCameraGraph(ref context, camera, m_RenderGraph, ref displayHdrTarget);
+                    CreateCameraGraph(context, camera, m_RenderGraph, sharedHdrDisplay0Target);
                 }
                 else
                 {
@@ -175,30 +170,51 @@ namespace Krp_BepInEx
             }
 
             //CreateBlit(m_RenderGraph, displayHdrTarget, BuiltinRenderTextureType.CameraTarget, "KRP HDR target to back buffer");
-            BlitToDisplayBackBuffer(m_RenderGraph, displayHdrTarget);
+            //BlitToDisplayBackBuffer(m_RenderGraph, displayHdrTarget);
+            var cmd = CommandBufferPool.Get("KRP HDR blit");
+            //CoreUtils.SetRenderTarget(cmd, BuiltinRenderTextureType.CameraTarget);
+            cmd.Blit(sharedHdrDisplay0Target, BuiltinRenderTextureType.CameraTarget);
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Clear();
+            cmd.Release();
 
-            m_RenderGraph.Execute();
-            context.ExecuteCommandBuffer(cmdRG);
-            CommandBufferPool.Release(cmdRG);
+
+            //m_RenderGraph.Execute();
+            //context.ExecuteCommandBuffer(cmdRG);
+            //CommandBufferPool.Release(cmdRG);
             context.Submit();
             EndFrameRendering(context, cameras);
 
             m_RenderGraph.EndFrame();
 
+            sharedHdrDisplay0Target.Release();
+
             frameIndex++;
         }
 
-        private void CreateCameraGraph(ref ScriptableRenderContext context, Camera camera, RenderGraph renderGraph, ref TextureHandle cameraTarget)
+        private void CreateCameraGraph(ScriptableRenderContext context, Camera camera, RenderGraph graph, RenderTexture cameraTarget)
         {
-            //BeginCameraRendering(context, camera);
+            BeginCameraRendering(context, camera);
 
             camera.TryGetCullingParameters(out var cullingParameters);
             var cullingResults = context.Cull(ref cullingParameters);
             context.SetupCameraProperties(camera);
 
-            //TextureHandle cameraBackBuffer = m_RenderGraph.ImportBackbuffer(camera.targetTexture);
+            CommandBuffer cmdRG = CommandBufferPool.Get("KRP camera " + camera.name);
+            RenderGraphParameters rgParams = new RenderGraphParameters()
+            {
+                commandBuffer = cmdRG,
+                scriptableRenderContext = context,
+                currentFrameIndex = Time.frameCount
+            };
+            graph.Begin(rgParams);
 
-            var gBufferPass = CreateGBufferPass(camera, renderGraph, cullingResults);
+            //var foo = (RenderTargetIdentifier)cameraTarget;
+            //var foo = graph.ImportBackbuffer((RenderTargetIdentifier)cameraTarget);
+            var target = graph.ImportBackbuffer(cameraTarget);
+            //var target = graph.ImportTexture(cameraTarget);
+
+            var gBufferPass = CreateGBufferPass(camera, graph, cullingResults);
 
             //var beforeReflectionCmd = camera.GetCommandBuffers(CameraEvent.BeforeReflections);
             //var aftereReflectionCmd = camera.GetCommandBuffers(CameraEvent.AfterReflections);
@@ -213,20 +229,25 @@ namespace Krp_BepInEx
 
             // This blit is just to have something to look at while deferred lighting is not done yet
             //CreateBlit(camera, m_RenderGraph, gbuffers.diffuse, intermediaTarget);
-            var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, cameraTarget, camera);
-            cameraTarget = lightPass.target;
+            var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, target, camera);
 
-            if (camera.clearFlags != CameraClearFlags.Nothing)
-            {
-                var skybox = CreateSkybox(camera, m_RenderGraph, cameraTarget, gBufferPass.gbuffers.depth);
-                cameraTarget = skybox.target;
-            }
+
+            //if (camera.clearFlags != CameraClearFlags.Nothing)
+            //{
+            //    var skybox = CreateSkybox(camera, m_RenderGraph, cameraTarget, gBufferPass.gbuffers.depth);
+            //    cameraTarget = skybox.target;
+            //}
 
             // transparent "SRPDefaultUnlit"
 
+            graph.Execute();
+            context.ExecuteCommandBuffer(cmdRG);
+            CommandBufferPool.Release(cmdRG);
+
+            context.Submit();
             EndCameraRendering(context, camera);
-            Camera.SetupCurrent(camera);
-            context.InvokeOnRenderObjectCallback();
+            //Camera.SetupCurrent(camera);
+            //context.InvokeOnRenderObjectCallback();
 
             //renderGraph.EndProfilingSampler(cameraSampler);
         }
@@ -371,6 +392,7 @@ namespace Krp_BepInEx
                     context.cmd.SetGlobalTexture("_CameraGBufferTexture1", data.gbuffer1);
                     context.cmd.SetGlobalTexture("_CameraGBufferTexture2", data.gbuffer2);
 
+                    //CoreUtils.SetRenderTarget(context.cmd, data.target, data.gbufferDepth);
                     context.cmd.SetRenderTarget(data.target, data.gbufferDepth);
                     context.cmd.SetGlobalMatrix("unity_MatrixV", Matrix4x4.identity);
                     var vp = Matrix4x4.TRS(
