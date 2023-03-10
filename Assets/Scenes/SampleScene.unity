@@ -883,7 +883,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1863252381}
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 2.79, y: 0, z: 0}
+  m_LocalPosition: {x: -2.08, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
@@ -969,7 +969,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!81 &1930739922
 AudioListener:
   m_ObjectHideFlags: 0
@@ -1028,13 +1028,13 @@ Transform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1930739921}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0.94817543, y: -0.66642714, z: -0.53678083}
+  m_LocalRotation: {x: -0, y: -0.016915865, z: -0, w: 0.999857}
+  m_LocalPosition: {x: -0.931, y: -0.706, z: -4.303}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
   m_RootOrder: 12
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: -1.939, z: 0}
 --- !u!1 &2064363137
 GameObject:
   m_ObjectHideFlags: 0

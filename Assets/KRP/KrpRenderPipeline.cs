@@ -140,6 +140,7 @@ namespace Krp_BepInEx
 
         protected override void Render(ScriptableRenderContext context, Camera[] cameras)
         {
+
             BeginFrameRendering(context, cameras);
 
             bool usedDisplayTarget = false;
@@ -151,7 +152,7 @@ namespace Krp_BepInEx
             RenderTexture sharedHdrDisplay0Target = new RenderTexture(hdrDisplayDesc);
             sharedHdrDisplay0Target.name = "KRP HDR shared buffer";
 
-            CommandBuffer cmdRG = CommandBufferPool.Get("KRP camera ");
+            CommandBuffer cmdRG = CommandBufferPool.Get("KRP main");
             RenderGraphParameters rgParams = new RenderGraphParameters()
             {
                 commandBuffer = cmdRG,
@@ -173,7 +174,20 @@ namespace Krp_BepInEx
                 else
                 {
                     var rttHandle = m_RenderGraph.ImportBackbuffer(camera.targetTexture);
-                    CreateCameraGraph(context, camera, m_RenderGraph, m_RenderGraph.ImportTexture(rttHandle));
+                    var hdrBufferDesc = new TextureDesc(camera.targetTexture.width, camera.targetTexture.height)
+                    {
+                        colorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                        clearBuffer = true,
+                        clearColor = Color.black,
+                        //width = camera.targetTexture.width,
+                        //height = camera.targetTexture.height,
+                        dimension = TextureDimension.Tex2D,
+                        slices = 1,
+                        enableMSAA = false,
+                    };
+                    var hdrBufferHandle = m_RenderGraph.CreateTexture(hdrBufferDesc);
+                    var cameraOut = CreateCameraGraph(context, camera, m_RenderGraph, hdrBufferHandle);
+                    CreateBlit(m_RenderGraph, cameraOut, ref rttHandle);
                 }
             }
 
@@ -202,9 +216,9 @@ namespace Krp_BepInEx
             frameIndex++;
         }
 
-        private void CreateCameraGraph(ScriptableRenderContext context, Camera camera, RenderGraph graph, TextureHandle cameraTarget)
+        private TextureHandle CreateCameraGraph(ScriptableRenderContext context, Camera camera, RenderGraph graph, TextureHandle cameraTarget)
         {
-
+            TextureHandle result;
 
             BeginCameraRendering(context, camera);
 
@@ -229,7 +243,7 @@ namespace Krp_BepInEx
             // This blit is just to have something to look at while deferred lighting is not done yet
             //CreateBlit(camera, m_RenderGraph, gbuffers.diffuse, intermediaTarget);
             var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, cameraTarget, camera);
-
+            result = lightPass.target;
 
             //if (camera.clearFlags != CameraClearFlags.Nothing)
             //{
@@ -244,6 +258,8 @@ namespace Krp_BepInEx
             //context.InvokeOnRenderObjectCallback();
 
             //renderGraph.EndProfilingSampler(cameraSampler);
+
+            return result;
         }
 
         private DeferredOpaqueGBufferData CreateGBufferPass(Camera camera, RenderGraph graph, CullingResults cull)
