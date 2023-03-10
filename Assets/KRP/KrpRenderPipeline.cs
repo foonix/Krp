@@ -134,6 +134,7 @@ namespace Krp_BepInEx
         {
             public TextureHandle target;
             public Camera camera;
+            public TextureHandle targetDepth;
         }
 
         class ForwardTransparent
@@ -238,6 +239,12 @@ namespace Krp_BepInEx
             //    CreateDefferedDefaultReflectionsPass(m_RenderGraph, gBufferPass, cameraTarget, beforeReflectionCmd, aftereReflectionCmd);
             //}
 
+            if (camera.clearFlags != CameraClearFlags.Nothing)
+            {
+                var skybox = CreateSkybox(camera, m_RenderGraph, result, gBufferPass.gbuffers.depth);
+                result = skybox.target;
+            }
+
             // need an actual shadow map
             //CollectScreenSpaceShadowsPass(renderGraph, gbuffers.depth, gbuffers.depth, camera);
             //var resolvedDepth = ResolveDepth(m_RenderGraph, gbuffers.depth, passAggregate, false);
@@ -246,12 +253,6 @@ namespace Krp_BepInEx
             //CreateBlit(camera, m_RenderGraph, gbuffers.diffuse, intermediaTarget);
             var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, result, camera);
             result = lightPass.result;
-
-            //if (camera.clearFlags != CameraClearFlags.Nothing)
-            //{
-            //    var skybox = CreateSkybox(camera, m_RenderGraph, cameraTarget, gBufferPass.gbuffers.depth);
-            //    cameraTarget = skybox.target;
-            //}
 
             // transparent "SRPDefaultUnlit"
 
@@ -519,15 +520,13 @@ namespace Krp_BepInEx
         {
             using (var builder = graph.AddRenderPass<DrawSkybox>("KRP skybox", out var passData))
             {
-                passData.target = dest;
+                passData.target = builder.WriteTexture(dest);
                 passData.camera = camera;
-
-                builder.WriteTexture(dest);
-                builder.ReadTexture(destDepth);
+                passData.targetDepth = builder.ReadTexture(destDepth);
 
                 builder.SetRenderFunc((DrawSkybox data, RenderGraphContext context) =>
                 {
-                    context.cmd.SetRenderTarget(data.target, destDepth);
+                    context.cmd.SetRenderTarget(data.target, data.targetDepth);
                     // without flushing the buffer, the render target setting here doesn't always apply.
                     context.renderContext.ExecuteCommandBuffer(context.cmd);
                     context.cmd.Clear();
