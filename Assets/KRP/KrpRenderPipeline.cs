@@ -111,7 +111,7 @@ namespace Krp_BepInEx
 
         class DeferredOpaqueLighting
         {
-            public TextureHandle target;
+            public TextureHandle result;
             public TextureHandle gbuffer0;
             public TextureHandle gbuffer1;
             public TextureHandle gbuffer2;
@@ -227,7 +227,8 @@ namespace Krp_BepInEx
             context.SetupCameraProperties(camera);
 
 
-            var gBufferPass = CreateGBufferPass(camera, graph, cullingResults);
+            var gBufferPass = CreateGBufferPass(camera, graph, cullingResults, cameraTarget);
+            result = gBufferPass.gbuffers.emissive;
 
             //var beforeReflectionCmd = camera.GetCommandBuffers(CameraEvent.BeforeReflections);
             //var aftereReflectionCmd = camera.GetCommandBuffers(CameraEvent.AfterReflections);
@@ -242,8 +243,8 @@ namespace Krp_BepInEx
 
             // This blit is just to have something to look at while deferred lighting is not done yet
             //CreateBlit(camera, m_RenderGraph, gbuffers.diffuse, intermediaTarget);
-            var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, cameraTarget, camera);
-            result = lightPass.target;
+            var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, result, camera);
+            result = lightPass.result;
 
             //if (camera.clearFlags != CameraClearFlags.Nothing)
             //{
@@ -262,13 +263,12 @@ namespace Krp_BepInEx
             return result;
         }
 
-        private DeferredOpaqueGBufferData CreateGBufferPass(Camera camera, RenderGraph graph, CullingResults cull)
+        private DeferredOpaqueGBufferData CreateGBufferPass(Camera camera, RenderGraph graph, CullingResults cull, TextureHandle lightingIn)
         {
             // TODO: check formats match KSP2
-            TextureHandle diffuse = CreateColorTexture(graph, camera, "GBUFFER diffuse");
-            TextureHandle specular = CreateColorTexture(graph, camera, "GBUFFER specular");
-            TextureHandle normals = CreateColorTexture(graph, camera, "GBUFFER normals", Color.black, RenderTextureFormat.ARGB2101010);
-            TextureHandle lighting = CreateColorTexture(graph, camera, "GBUFFER lighting", Color.black, RenderTextureFormat.ARGBHalf);
+            TextureHandle diffuse = CreateColorTexture(graph, camera, "GBUFFER diffuse", Color.black, RenderTextureFormat.ARGB32, true);
+            TextureHandle specular = CreateColorTexture(graph, camera, "GBUFFER specular",Color.black, RenderTextureFormat.ARGB32, true);
+            TextureHandle normals = CreateColorTexture(graph, camera, "GBUFFER normals", Color.black, RenderTextureFormat.ARGB2101010, true);
             TextureHandle depth = CreateDepthTexture(graph, camera, "GBUFFER depth");
 
             using (var builder = graph.AddRenderPass<DeferredOpaqueGBufferData>("KRP Opaque GBUFFER pass " + camera.name, out var passData))
@@ -277,14 +277,15 @@ namespace Krp_BepInEx
                 passData.gbuffers.gBuffer0 = builder.WriteTexture(diffuse);
                 passData.gbuffers.gBuffer1 = builder.WriteTexture(specular);
                 passData.gbuffers.normals = builder.WriteTexture(normals);
-                passData.gbuffers.emissive = builder.WriteTexture(lighting);
+                passData.gbuffers.emissive = builder.ReadWriteTexture(lightingIn);
                 passData.gbuffers.depth = builder.UseDepthBuffer(depth, DepthAccess.Write);
 
                 // culling
                 RendererListDesc rendererDesc_base_Opaque = new RendererListDesc(deferredPassTag, cull, camera)
                 {
                     sortingCriteria = SortingCriteria.CommonOpaque,
-                    renderQueueRange = RenderQueueRange.opaque
+                    renderQueueRange = RenderQueueRange.opaque,
+                    rendererConfiguration = PerObjectData.None,
                 };
                 RendererListHandle rHandle_base_Opaque = graph.CreateRendererList(rendererDesc_base_Opaque);
                 passData.opaqueRenderers = builder.UseRendererList(rHandle_base_Opaque);
@@ -390,7 +391,7 @@ namespace Krp_BepInEx
                 passData.gbuffer1 = builder.ReadTexture(gBufferPass.gbuffers.gBuffer1);
                 passData.gbuffer2 = builder.ReadTexture(gBufferPass.gbuffers.normals);
                 passData.gbufferDepth = builder.ReadTexture(gBufferPass.gbuffers.depth);
-                passData.target = builder.WriteTexture(target);
+                passData.result = builder.WriteTexture(target);
 
                 //builder.AllowPassCulling(false);
 
@@ -403,7 +404,7 @@ namespace Krp_BepInEx
                     context.cmd.SetGlobalTexture("_CameraGBufferTexture2", data.gbuffer2);
 
                     //CoreUtils.SetRenderTarget(context.cmd, data.target, data.gbufferDepth);
-                    context.cmd.SetRenderTarget(data.target, data.gbufferDepth);
+                    context.cmd.SetRenderTarget(data.result, data.gbufferDepth);
                     context.cmd.SetGlobalMatrix("unity_MatrixV", Matrix4x4.identity);
                     var vp = Matrix4x4.TRS(
                         new Vector3(0, 0, 1),
@@ -424,7 +425,7 @@ namespace Krp_BepInEx
 
                                 var forward = light.localToWorldMatrix * new Vector4(0, 0, 1, 0); // forward vector as a vector4
                                 lightInfo.SetVector("_LightDir", forward);
-                                lightInfo.SetColor("_LightColor", light.light.color);
+                                lightInfo.SetColor("_LightColor", light.finalColor);
                                 lightInfo.SetFloat("_LightAsQuad", 1);
                                 break;
                             default:
@@ -564,6 +565,8 @@ namespace Krp_BepInEx
             CoreUtils.SetRenderTarget(ctx.cmd, gbuffer, data.gbuffers.depth);
 
             ctx.cmd.EnableShaderKeyword("UNITY_HDR_ON");
+            ctx.cmd.EnableShaderKeyword("LIGHTPROBE_SH");
+            Shader.EnableKeyword("LIGHTPROBE_SH");
 
             ExecuteCommandBuffersForEvent(ctx.renderContext, camera, CameraEvent.BeforeGBuffer);
             CoreUtils.DrawRendererList(ctx.renderContext, ctx.cmd, data.opaqueRenderers);
@@ -576,15 +579,11 @@ namespace Krp_BepInEx
         private static TextureHandle CreateColorTexture(RenderGraph graph, Camera camera, string name)
         => CreateColorTexture(graph, camera, name, Color.black);
 
-        private static TextureHandle CreateColorTexture(RenderGraph graph, Camera camera, string name, Color clearColor, RenderTextureFormat format = RenderTextureFormat.ARGB32)
+        private static TextureHandle CreateColorTexture(RenderGraph graph, Camera camera, string name, Color clearColor, RenderTextureFormat format = RenderTextureFormat.ARGB32, bool sRGB = false)
         {
-            //bool colorRT_sRGB = (QualitySettings.activeColorSpace == ColorSpace.Linear);
-            bool colorRT_sRGB = false;
-
-            //Texture description
             TextureDesc colorRTDesc = new TextureDesc(camera.pixelWidth, camera.pixelHeight)
             {
-                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(format, colorRT_sRGB),
+                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(format, sRGB),
                 depthBufferBits = 0,
                 msaaSamples = MSAASamples.None,
                 enableRandomWrite = false,
@@ -598,54 +597,19 @@ namespace Krp_BepInEx
 
         private static TextureHandle CreateDepthTexture(RenderGraph graph, Camera camera, string name)
         {
-            bool colorRT_sRGB = (QualitySettings.activeColorSpace == ColorSpace.Linear);
-
-            //Texture description
             TextureDesc colorRTDesc = new TextureDesc(camera.pixelWidth, camera.pixelHeight)
             {
-                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(RenderTextureFormat.Depth, colorRT_sRGB),
-                depthBufferBits = DepthBits.Depth24,
+                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(RenderTextureFormat.Depth, false),
+                depthBufferBits = DepthBits.Depth32,
                 msaaSamples = MSAASamples.None,
                 enableRandomWrite = false,
                 clearBuffer = true,
-                clearColor = Color.black,
-                name = name
+                name = name,
             };
 
             return graph.CreateTexture(colorRTDesc);
         }
         #endregion
-
-        /// <summary>
-        /// Mimic the 16 bit SFloat behavior of BRP when HDR is enabled.
-        /// (KSP2 always runs in HDR render mode, even if no HDR output.)       
-        /// </summary>
-        /// <param name="graph"></param>
-        /// <param name="name"></param>
-        /// <returns></returns>
-        private static TextureHandle CreateMainScreenHdrTarget(RenderGraph graph, string name, int displayId)
-        {
-            bool colorRT_sRGB = (QualitySettings.activeColorSpace == ColorSpace.Linear);
-
-            var display = Display.displays[displayId];
-
-            var width = display.renderingWidth;
-            var height = display.renderingHeight;
-
-            //Texture description
-            TextureDesc colorRTDesc = new TextureDesc(width, height)
-            {
-                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(RenderTextureFormat.DefaultHDR, colorRT_sRGB),
-                depthBufferBits = 0,
-                msaaSamples = MSAASamples.None,
-                enableRandomWrite = false,
-                clearBuffer = true,
-                clearColor = Color.black,
-                name = name
-            };
-
-            return graph.CreateTexture(colorRTDesc);
-        }
 
         private static void DrawFullScreenTriangle(CommandBuffer cmd, Material material, MaterialPropertyBlock properties, int pass = 0)
         {
