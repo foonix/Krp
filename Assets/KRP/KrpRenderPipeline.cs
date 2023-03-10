@@ -34,18 +34,24 @@ namespace Krp_BepInEx
         CommandBuffer commandBuffer = new CommandBuffer();
         int frameIndex = 0;
 
-        // The constructor has an instance of the ExampleRenderPipelineAsset class as its parameter.
         public KrpRenderPipeline(KrpPipelineAsset asset)
         {
             renderPipelineAsset = asset;
-            deferredLighting = CoreUtils.CreateEngineMaterial("Hidden/Internal-DeferredShading");
 
-            //deferredLighting = CoreUtils.CreateEngineMaterial("Hidden/Graphics-DeferredShading");
+            Shader shader;
 
-            deferredScreenSpaceShadows = CoreUtils.CreateEngineMaterial("Hidden/Internal-ScreenSpaceShadows");
-            deferredReflections = CoreUtils.CreateEngineMaterial("Hidden/Internal-DeferredReflections");
+            // shader names differ depending if running this in KSP2 or testing in unity project
+            shader = Shader.Find("Hidden/Internal-DeferredShading");
+            shader ??= Shader.Find("Hidden/Graphics-DeferredShading");
+            deferredLighting = CoreUtils.CreateEngineMaterial(shader);
 
-            //blitMaterial = CoreUtils.CreateEngineMaterial("Hidden/BlitCopy");
+            shader = Shader.Find("Hidden/Internal-ScreenSpaceShadows");
+            shader ??= Shader.Find("Hidden/Graphics-ScreenSpaceShadows");
+            deferredScreenSpaceShadows = CoreUtils.CreateEngineMaterial(shader);
+
+            shader = Shader.Find("Hidden/Internal-DeferredReflections");
+            shader ??= Shader.Find("Hidden/Graphics-DeferredReflections");
+            deferredReflections = CoreUtils.CreateEngineMaterial(shader);
 
             m_RenderGraph = new RenderGraph("KRP Render Graph");
             commandBuffer.name = "KRP reusable";
@@ -76,13 +82,6 @@ namespace Krp_BepInEx
             public TextureHandle gBuffer1;
             public TextureHandle normals;
             public TextureHandle emissive;
-            public TextureHandle depth;
-        }
-
-        class CameraPassData
-        {
-            public Camera camera;
-
             public TextureHandle depth;
         }
 
@@ -143,45 +142,56 @@ namespace Krp_BepInEx
         {
             BeginFrameRendering(context, cameras);
 
+            bool usedDisplayTarget = false;
+
             var mainDisplay = Display.main;
             RTHandles.SetReferenceSize(mainDisplay.renderingWidth, mainDisplay.renderingHeight, MSAASamples.None);
-            
+
             var hdrDisplayDesc = new RenderTextureDescriptor(mainDisplay.renderingWidth, mainDisplay.renderingHeight, RenderTextureFormat.DefaultHDR);
             RenderTexture sharedHdrDisplay0Target = new RenderTexture(hdrDisplayDesc);
             sharedHdrDisplay0Target.name = "KRP HDR shared buffer";
 
+            CommandBuffer cmdRG = CommandBufferPool.Get("KRP camera ");
+            RenderGraphParameters rgParams = new RenderGraphParameters()
+            {
+                commandBuffer = cmdRG,
+                scriptableRenderContext = context,
+                currentFrameIndex = Time.frameCount
+            };
+            m_RenderGraph.Begin(rgParams);
+
+            var sharedHdrDisplay0TargetHandle = m_RenderGraph.ImportBackbuffer(sharedHdrDisplay0Target);
+
             // Iterate over all Cameras
-            // TODO: share HDR render targets between cameras with the same render target the same way BRP does,
-            // and do final blit/grading to back buffer
             foreach (Camera camera in cameras)
             {
                 if (camera.targetTexture is null)
                 {
-                    //CreateCameraGraph(ref context, camera, m_RenderGraph, ref displayHdrTarget);
-                    CreateCameraGraph(context, camera, m_RenderGraph, sharedHdrDisplay0Target);
+                    CreateCameraGraph(context, camera, m_RenderGraph, sharedHdrDisplay0TargetHandle);
+                    usedDisplayTarget = true;
                 }
                 else
                 {
-                    continue;
-                    //RTHandle rttTargetHandle = RTHandles.Alloc(camera.targetTexture);
-                    //CreateCameraGraph(ref context, camera, m_RenderGraph, m_RenderGraph.ImportTexture(rttTargetHandle));
+                    var rttHandle = m_RenderGraph.ImportBackbuffer(camera.targetTexture);
+                    CreateCameraGraph(context, camera, m_RenderGraph, m_RenderGraph.ImportTexture(rttHandle));
                 }
-                //CreateCameraGraph(ref context, camera, m_RenderGraph);
             }
 
-            //CreateBlit(m_RenderGraph, displayHdrTarget, BuiltinRenderTextureType.CameraTarget, "KRP HDR target to back buffer");
-            //BlitToDisplayBackBuffer(m_RenderGraph, displayHdrTarget);
-            var cmd = CommandBufferPool.Get("KRP HDR blit");
-            //CoreUtils.SetRenderTarget(cmd, BuiltinRenderTextureType.CameraTarget);
-            cmd.Blit(sharedHdrDisplay0Target, BuiltinRenderTextureType.CameraTarget);
-            context.ExecuteCommandBuffer(cmd);
-            cmd.Clear();
-            cmd.Release();
+            m_RenderGraph.Execute();
+            context.ExecuteCommandBuffer(cmdRG);
+            CommandBufferPool.Release(cmdRG);
 
+            context.Submit();
 
-            //m_RenderGraph.Execute();
-            //context.ExecuteCommandBuffer(cmdRG);
-            //CommandBufferPool.Release(cmdRG);
+            if (usedDisplayTarget)
+            {
+                var cmd = CommandBufferPool.Get("KRP HDR blit");
+                cmd.Blit(sharedHdrDisplay0Target, BuiltinRenderTextureType.CameraTarget);
+                context.ExecuteCommandBuffer(cmd);
+                cmd.Clear();
+                cmd.Release();
+            }
+
             context.Submit();
             EndFrameRendering(context, cameras);
 
@@ -192,27 +202,16 @@ namespace Krp_BepInEx
             frameIndex++;
         }
 
-        private void CreateCameraGraph(ScriptableRenderContext context, Camera camera, RenderGraph graph, RenderTexture cameraTarget)
+        private void CreateCameraGraph(ScriptableRenderContext context, Camera camera, RenderGraph graph, TextureHandle cameraTarget)
         {
+
+
             BeginCameraRendering(context, camera);
 
             camera.TryGetCullingParameters(out var cullingParameters);
             var cullingResults = context.Cull(ref cullingParameters);
             context.SetupCameraProperties(camera);
 
-            CommandBuffer cmdRG = CommandBufferPool.Get("KRP camera " + camera.name);
-            RenderGraphParameters rgParams = new RenderGraphParameters()
-            {
-                commandBuffer = cmdRG,
-                scriptableRenderContext = context,
-                currentFrameIndex = Time.frameCount
-            };
-            graph.Begin(rgParams);
-
-            //var foo = (RenderTargetIdentifier)cameraTarget;
-            //var foo = graph.ImportBackbuffer((RenderTargetIdentifier)cameraTarget);
-            var target = graph.ImportBackbuffer(cameraTarget);
-            //var target = graph.ImportTexture(cameraTarget);
 
             var gBufferPass = CreateGBufferPass(camera, graph, cullingResults);
 
@@ -229,7 +228,7 @@ namespace Krp_BepInEx
 
             // This blit is just to have something to look at while deferred lighting is not done yet
             //CreateBlit(camera, m_RenderGraph, gbuffers.diffuse, intermediaTarget);
-            var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, target, camera);
+            var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, cameraTarget, camera);
 
 
             //if (camera.clearFlags != CameraClearFlags.Nothing)
@@ -240,11 +239,6 @@ namespace Krp_BepInEx
 
             // transparent "SRPDefaultUnlit"
 
-            graph.Execute();
-            context.ExecuteCommandBuffer(cmdRG);
-            CommandBufferPool.Release(cmdRG);
-
-            context.Submit();
             EndCameraRendering(context, camera);
             //Camera.SetupCurrent(camera);
             //context.InvokeOnRenderObjectCallback();
@@ -257,11 +251,11 @@ namespace Krp_BepInEx
             // TODO: check formats match KSP2
             TextureHandle diffuse = CreateColorTexture(graph, camera, "GBUFFER diffuse");
             TextureHandle specular = CreateColorTexture(graph, camera, "GBUFFER specular");
-            TextureHandle normals = CreateColorTexture(graph, camera, "GBUFFER normals");
-            TextureHandle lighting = CreateColorTexture(graph, camera, "GBUFFER lighting");
+            TextureHandle normals = CreateColorTexture(graph, camera, "GBUFFER normals", Color.black, RenderTextureFormat.ARGB2101010);
+            TextureHandle lighting = CreateColorTexture(graph, camera, "GBUFFER lighting", Color.black, RenderTextureFormat.ARGBHalf);
             TextureHandle depth = CreateDepthTexture(graph, camera, "GBUFFER depth");
 
-            using (var builder = graph.AddRenderPass<DeferredOpaqueGBufferData>("KRP Opaque GBUFFER pass", out var passData))
+            using (var builder = graph.AddRenderPass<DeferredOpaqueGBufferData>("KRP Opaque GBUFFER pass " + camera.name, out var passData))
             {
                 passData.camera = camera;
                 passData.gbuffers.gBuffer0 = builder.WriteTexture(diffuse);
@@ -370,7 +364,7 @@ namespace Krp_BepInEx
 
         DeferredOpaqueLighting CreateDeferredOpaqueLightingPass(RenderGraph graph, CullingResults cullingResults, DeferredOpaqueGBufferData gBufferPass, TextureHandle target, Camera camera)
         {
-            using (var builder = graph.AddRenderPass<DeferredOpaqueLighting>("KRP Opaque light pass", out var passData))
+            using (var builder = graph.AddRenderPass<DeferredOpaqueLighting>("KRP Opaque light pass " + camera.name, out var passData))
             {
                 // probably won't work
                 passData.visibleLights = cullingResults.visibleLights;
@@ -566,14 +560,15 @@ namespace Krp_BepInEx
         private static TextureHandle CreateColorTexture(RenderGraph graph, Camera camera, string name)
         => CreateColorTexture(graph, camera, name, Color.black);
 
-        private static TextureHandle CreateColorTexture(RenderGraph graph, Camera camera, string name, Color clearColor)
+        private static TextureHandle CreateColorTexture(RenderGraph graph, Camera camera, string name, Color clearColor, RenderTextureFormat format = RenderTextureFormat.ARGB32)
         {
-            bool colorRT_sRGB = (QualitySettings.activeColorSpace == ColorSpace.Linear);
+            //bool colorRT_sRGB = (QualitySettings.activeColorSpace == ColorSpace.Linear);
+            bool colorRT_sRGB = false;
 
             //Texture description
             TextureDesc colorRTDesc = new TextureDesc(camera.pixelWidth, camera.pixelHeight)
             {
-                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(RenderTextureFormat.Default, colorRT_sRGB),
+                colorFormat = GraphicsFormatUtility.GetGraphicsFormat(format, colorRT_sRGB),
                 depthBufferBits = 0,
                 msaaSamples = MSAASamples.None,
                 enableRandomWrite = false,
