@@ -227,8 +227,6 @@ namespace Krp_BepInEx
 
             camera.TryGetCullingParameters(out var cullingParameters);
             var cullingResults = context.Cull(ref cullingParameters);
-            context.SetupCameraProperties(camera);
-
 
             var gBufferPass = CreateGBufferPass(camera, graph, cullingResults, cameraTarget);
             result = gBufferPass.gbuffers.emissive;
@@ -566,6 +564,7 @@ namespace Krp_BepInEx
             gbuffer[3] = data.gbuffers.emissive;
 
             CoreUtils.SetRenderTarget(ctx.cmd, gbuffer, data.gbuffers.depth);
+            ctx.renderContext.SetupCameraProperties(camera);
 
             ctx.cmd.EnableShaderKeyword("UNITY_HDR_ON");
             ctx.cmd.EnableShaderKeyword("LIGHTPROBE_SH");
