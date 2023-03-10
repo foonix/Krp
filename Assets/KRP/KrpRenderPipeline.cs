@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Xml.Linq;
 using Unity.Collections;
 using Unity.Profiling;
-using UnityEditor.Graphs;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Experimental.Rendering.RenderGraphModule;
@@ -17,6 +16,7 @@ namespace Krp_BepInEx
         private readonly KrpPipelineAsset renderPipelineAsset;
 
         RenderGraph m_RenderGraph;
+        private RenderTexture sharedHdrDisplay0Target;
 
         static readonly ProfilerMarker s_KrpOpaqueMarker = new ProfilerMarker("KrpRenderPipeline opaque");
         static readonly ProfilerMarker s_KrpTransparentMarker = new ProfilerMarker("KrpRenderPipeline transparent");
@@ -38,20 +38,24 @@ namespace Krp_BepInEx
         {
             renderPipelineAsset = asset;
 
-            Shader shader;
-
             // shader names differ depending if running this in KSP2 or testing in unity project
+            Shader shader;
             shader = Shader.Find("Hidden/Internal-DeferredShading");
-            shader ??= Shader.Find("Hidden/Graphics-DeferredShading");
+            if (shader is null)
+            {
+                shader = Shader.Find("Hidden/Graphics-DeferredShading");
+            }
             deferredLighting = CoreUtils.CreateEngineMaterial(shader);
 
-            shader = Shader.Find("Hidden/Internal-ScreenSpaceShadows");
-            shader ??= Shader.Find("Hidden/Graphics-ScreenSpaceShadows");
-            deferredScreenSpaceShadows = CoreUtils.CreateEngineMaterial(shader);
+            //shader = Shader.Find("Hidden/Internal-ScreenSpaceShadows");
+            //if (shader is null)
+            //{
+            //    shader = Shader.Find("Hidden/Graphics-ScreenSpaceShadows");
+            //}
+            //deferredScreenSpaceShadows = CoreUtils.CreateEngineMaterial(shader);
 
-            shader = Shader.Find("Hidden/Internal-DeferredReflections");
-            shader ??= Shader.Find("Hidden/Graphics-DeferredReflections");
-            deferredReflections = CoreUtils.CreateEngineMaterial(shader);
+            //shader = Shader.Find("Hidden/Internal-DeferredReflections");
+            //deferredReflections = CoreUtils.CreateEngineMaterial(shader);
 
             m_RenderGraph = new RenderGraph("KRP Render Graph");
             commandBuffer.name = "KRP reusable";
@@ -148,9 +152,12 @@ namespace Krp_BepInEx
             var mainDisplay = Display.main;
             RTHandles.SetReferenceSize(mainDisplay.renderingWidth, mainDisplay.renderingHeight, MSAASamples.None);
 
-            var hdrDisplayDesc = new RenderTextureDescriptor(mainDisplay.renderingWidth, mainDisplay.renderingHeight, RenderTextureFormat.DefaultHDR);
-            RenderTexture sharedHdrDisplay0Target = new RenderTexture(hdrDisplayDesc);
-            sharedHdrDisplay0Target.name = "KRP HDR shared buffer";
+            if (sharedHdrDisplay0Target is null || sharedHdrDisplay0Target.width != mainDisplay.renderingWidth || sharedHdrDisplay0Target.height != mainDisplay.renderingHeight)
+            {
+                var hdrDisplayDesc = new RenderTextureDescriptor(mainDisplay.renderingWidth, mainDisplay.renderingHeight, RenderTextureFormat.DefaultHDR);
+                sharedHdrDisplay0Target = new RenderTexture(hdrDisplayDesc);
+                sharedHdrDisplay0Target.name = "KRP HDR shared buffer";
+            }
 
             CommandBuffer cmdRG = CommandBufferPool.Get("KRP main");
             RenderGraphParameters rgParams = new RenderGraphParameters()
@@ -195,8 +202,6 @@ namespace Krp_BepInEx
             context.ExecuteCommandBuffer(cmdRG);
             CommandBufferPool.Release(cmdRG);
 
-            context.Submit();
-
             if (usedDisplayTarget)
             {
                 var cmd = CommandBufferPool.Get("KRP HDR blit");
@@ -207,12 +212,10 @@ namespace Krp_BepInEx
             }
 
             context.Submit();
+
             EndFrameRendering(context, cameras);
 
             m_RenderGraph.EndFrame();
-
-            sharedHdrDisplay0Target.Release();
-
             frameIndex++;
         }
 
@@ -267,7 +270,7 @@ namespace Krp_BepInEx
         {
             // TODO: check formats match KSP2
             TextureHandle diffuse = CreateColorTexture(graph, camera, "GBUFFER diffuse", Color.black, RenderTextureFormat.ARGB32, true);
-            TextureHandle specular = CreateColorTexture(graph, camera, "GBUFFER specular",Color.black, RenderTextureFormat.ARGB32, true);
+            TextureHandle specular = CreateColorTexture(graph, camera, "GBUFFER specular", Color.black, RenderTextureFormat.ARGB32, true);
             TextureHandle normals = CreateColorTexture(graph, camera, "GBUFFER normals", Color.black, RenderTextureFormat.ARGB2101010, true);
             TextureHandle depth = CreateDepthTexture(graph, camera, "GBUFFER depth");
 
