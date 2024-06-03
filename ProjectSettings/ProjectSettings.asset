@@ -648,7 +648,7 @@ PlayerSettings:
     m_VersionName: 
   apiCompatibilityLevel: 6
   activeInputHandler: 2
-  cloudProjectId: 9640cddf-acc7-45b8-a4bb-230b967dab34
+  cloudProjectId: 
   framebufferDepthMemorylessMode: 0
   qualitySettingsNames:
   - Fastest
@@ -657,8 +657,8 @@ PlayerSettings:
   - Good
   - Beautiful
   - Fantastic
-  projectName: KSP2
-  organizationId: privatedivision
+  projectName: 
+  organizationId: 
   cloudEnabled: 0
   legacyClampBlendShapeWeights: 1
   virtualTexturingSupportEnabled: 0

@@ -29,7 +29,8 @@ namespace Krp_BepInEx
         static Mesh fullScreenTriangle;
 
         private static readonly ShaderTagId deferredPassTag = new ShaderTagId("DEFERRED");
-        private static readonly ShaderTagId transparentPassTag = new ShaderTagId("FORWARDBASE");
+        private static readonly ShaderTagId transparentPassTag = new ShaderTagId("SRPDefaultUnlit");
+
 
         CommandBuffer commandBuffer = new CommandBuffer();
         int frameIndex = 0;
@@ -139,8 +140,10 @@ namespace Krp_BepInEx
 
         class ForwardTransparent
         {
+            public Camera camera;
             public RendererListHandle transparentRenderers;
-            public TextureHandle target;
+            public TextureHandle output;
+            public TextureHandle depth;
         }
 
         protected override void Render(ScriptableRenderContext context, Camera[] cameras)
@@ -249,12 +252,12 @@ namespace Krp_BepInEx
             //CollectScreenSpaceShadowsPass(renderGraph, gbuffers.depth, gbuffers.depth, camera);
             //var resolvedDepth = ResolveDepth(m_RenderGraph, gbuffers.depth, passAggregate, false);
 
-            // This blit is just to have something to look at while deferred lighting is not done yet
-            //CreateBlit(camera, m_RenderGraph, gbuffers.diffuse, intermediaTarget);
             var lightPass = CreateDeferredOpaqueLightingPass(m_RenderGraph, cullingResults, gBufferPass, result, camera);
             result = lightPass.result;
 
             // transparent "SRPDefaultUnlit"
+            var forwardTransparent = CreateForwardTransparentPass(m_RenderGraph, cullingResults, camera, result, gBufferPass.gbuffers.depth);
+            result = forwardTransparent.output;
 
             EndCameraRendering(context, camera);
             //Camera.SetupCurrent(camera);
@@ -292,7 +295,7 @@ namespace Krp_BepInEx
                 RendererListHandle rHandle_base_Opaque = graph.CreateRendererList(rendererDesc_base_Opaque);
                 passData.opaqueRenderers = builder.UseRendererList(rHandle_base_Opaque);
 
-                builder.SetRenderFunc<DeferredOpaqueGBufferData>(RenderDeferredGBuffer); // details below.
+                builder.SetRenderFunc<DeferredOpaqueGBufferData>(RenderDeferredGBuffer);
                 return passData;
             }
         }
@@ -446,6 +449,44 @@ namespace Krp_BepInEx
             }
         }
 
+
+        private ForwardTransparent CreateForwardTransparentPass(RenderGraph graph, CullingResults cullingResults, Camera forCamera, TextureHandle src, TextureHandle depth)
+        {
+            using (var builder = graph.AddRenderPass<ForwardTransparent>("KRP Forward Transparent", out var passData))
+            {
+                passData.output = builder.ReadWriteTexture(src);
+                passData.depth = builder.ReadTexture(depth);
+                passData.camera = forCamera;
+
+                // culling
+                RendererListDesc rendererDesc_base_Opaque = new RendererListDesc(transparentPassTag, cullingResults, forCamera)
+                {
+                    sortingCriteria = SortingCriteria.CommonTransparent,
+                    renderQueueRange = RenderQueueRange.transparent,
+                    rendererConfiguration = PerObjectData.None,
+                };
+                RendererListHandle handle = graph.CreateRendererList(rendererDesc_base_Opaque);
+                passData.transparentRenderers = builder.UseRendererList(handle);
+
+                builder.SetRenderFunc((ForwardTransparent data, RenderGraphContext context) =>
+                {
+                    var camera = data.camera;
+
+                    context.renderContext.SetupCameraProperties(camera);
+                    context.cmd.SetRenderTarget(data.output, data.depth);
+
+                    context.cmd.EnableShaderKeyword("UNITY_HDR_ON");
+                    //context.cmd.EnableShaderKeyword("LIGHTPROBE_SH");
+
+                    //ExecuteCommandBuffersForEvent(context.renderContext, camera, CameraEvent.BeforeForwardAlpha);
+                    CoreUtils.DrawRendererList(context.renderContext, context.cmd, data.transparentRenderers);
+                    //ExecuteCommandBuffersForEvent(context.renderContext, camera, CameraEvent.AfterForwardAlpha);
+                });
+
+                return passData;
+            }
+        }
+
         private BlitCopy CreateBlit(RenderGraph graph, TextureHandle src, ref TextureHandle dest, string name = "KRP blit")
         {
             using (var builder = graph.AddRenderPass<BlitCopy>(name, out var passData))
@@ -520,7 +561,7 @@ namespace Krp_BepInEx
         {
             using (var builder = graph.AddRenderPass<DrawSkybox>("KRP skybox", out var passData))
             {
-                passData.target = builder.WriteTexture(dest);
+                passData.target = builder.ReadWriteTexture(dest);
                 passData.camera = camera;
                 passData.targetDepth = builder.ReadTexture(destDepth);
 
